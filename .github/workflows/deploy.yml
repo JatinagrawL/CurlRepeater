@@ -1,0 +1,42 @@
+name: Build & Deploy to runasp.net
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:   # allows manual trigger from GitHub UI
+
+jobs:
+  deploy:
+    runs-on: windows-latest   # MSDeploy is Windows-only
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Publish (Release, win-x64)
+        run: |
+          dotnet publish CurlRepeater.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained false `
+            -o ./publish
+
+      - name: Deploy via WebDeploy (MSDeploy)
+        run: |
+          $msdeploy = "C:\Program Files\IIS\Microsoft Web Deploy V3\msdeploy.exe"
+          & $msdeploy `
+            -verb:sync `
+            -source:contentPath="$(Resolve-Path ./publish)" `
+            -dest:contentPath="site69136",`
+                  computerName="https://site69136.siteasp.net:8172/msdeploy.axd?site=site69136",`
+                  userName="${{ secrets.MSDEPLOY_USER }}",`
+                  password="${{ secrets.MSDEPLOY_PASSWORD }}",`
+                  authType="Basic" `
+            -allowUntrusted `
+            -enableRule:AppOffline
+        shell: powershell
