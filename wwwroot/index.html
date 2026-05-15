@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Curl Repeater</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #0f1117; color: #e2e8f0; min-height: 100vh; padding: 24px 28px;
+    max-width: 1200px; margin: 0 auto;
+  }
+
+  /* ── header ── */
+  .app-header {
+    display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px;
+  }
+  .app-header h1 { font-size: 1.35rem; font-weight: 700; color: #f8fafc; }
+  .app-header .sub { font-size: 0.75rem; color: #475569; margin-top: 2px; }
+
+  /* mode toggle */
+  .mode-toggle {
+    display: flex; background: #161b27; border: 1px solid #2d3748;
+    border-radius: 10px; padding: 4px; gap: 2px;
+  }
+  .mode-btn {
+    padding: 7px 20px; border-radius: 7px; font-size: 0.8rem; font-weight: 700;
+    cursor: pointer; border: none; transition: all .15s; color: #64748b; background: transparent;
+  }
+  .mode-btn.active { color: #fff; }
+  .mode-btn.repeater.active  { background: #6366f1; }
+  .mode-btn.extractor.active { background: #0891b2; }
+
+  section { margin-bottom: 18px; }
+
+  label {
+    display: block; font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .07em; color: #64748b; margin-bottom: 6px;
+  }
+
+  textarea, input[type=text] {
+    width: 100%; background: #1e2330; border: 1px solid #2d3748; border-radius: 8px;
+    color: #e2e8f0; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.8rem;
+    padding: 10px 12px; outline: none; transition: border-color .15s;
+  }
+  textarea { resize: vertical; min-height: 110px; }
+  textarea:focus, input[type=text]:focus { border-color: #6366f1; }
+
+  button {
+    cursor: pointer; border: none; border-radius: 8px; font-size: 0.82rem;
+    font-weight: 600; padding: 9px 18px; transition: opacity .15s, transform .08s;
+  }
+  button:active { transform: scale(.97); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+
+  .btn-indigo  { background: #6366f1; color: #fff; }
+  .btn-indigo:hover:not(:disabled)  { background: #4f46e5; }
+  .btn-cyan    { background: #0891b2; color: #fff; }
+  .btn-cyan:hover:not(:disabled)    { background: #0e7490; }
+  .btn-green   { background: #22c55e; color: #fff; }
+  .btn-green:hover:not(:disabled)   { background: #16a34a; }
+  .btn-ghost   { background: #1e2330; border: 1px solid #2d3748; color: #94a3b8; }
+  .btn-ghost:hover:not(:disabled)   { border-color: #6366f1; color: #e2e8f0; }
+  .btn-danger  { background: #ef4444; color: #fff; }
+  .btn-danger:hover:not(:disabled)  { background: #dc2626; }
+
+  .row { display: flex; gap: 10px; align-items: flex-start; }
+  .row textarea { flex: 1; }
+
+  .url-bar { display: flex; gap: 8px; }
+  .url-bar input { flex: 1; }
+  .method-badge {
+    background: #1e2330; border: 1px solid #2d3748; border-radius: 8px;
+    color: #6366f1; font-size: 0.78rem; font-weight: 700; padding: 9px 14px; white-space: nowrap;
+  }
+
+  /* tabs */
+  .tab-bar {
+    display: flex; gap: 2px; background: #0f1117; border: 1px solid #2d3748;
+    border-radius: 8px; padding: 4px; margin-bottom: 12px; width: fit-content;
+  }
+  .tab {
+    padding: 5px 14px; border-radius: 6px; font-size: 0.75rem; font-weight: 600;
+    color: #64748b; cursor: pointer; transition: background .15s, color .15s;
+  }
+  .tab.active { background: #6366f1; color: #fff; }
+  .tab .badge {
+    display: inline-block; background: #312e81; color: #a5b4fc;
+    border-radius: 10px; font-size: 0.65rem; padding: 1px 6px; margin-left: 4px;
+  }
+  .tab.active .badge { background: #4338ca; color: #e0e7ff; }
+
+  /* tables */
+  .table-wrap { border: 1px solid #2d3748; border-radius: 8px; overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  thead { background: #0f1117; }
+  th {
+    text-align: left; padding: 8px 12px; font-size: 0.7rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .06em; color: #64748b; border-bottom: 1px solid #2d3748;
+  }
+  td { padding: 7px 10px; border-bottom: 1px solid #1a2030; vertical-align: middle; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: #1a2030; }
+  td input[type=text]     { padding: 5px 8px; font-size: 0.8rem; border-radius: 6px; }
+  td input[type=checkbox] { width: 16px; height: 16px; accent-color: #6366f1; cursor: pointer; }
+
+  .values-input {
+    width: 100%; background: #0f1724; border: 1px dashed #6366f1; border-radius: 6px;
+    color: #a5b4fc; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.8rem; padding: 5px 8px;
+  }
+  .values-input::placeholder { color: #3d4b6b; }
+
+  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .section-header label { margin-bottom: 0; }
+
+  .empty-state { text-align: center; padding: 26px; color: #334155; font-size: 0.82rem; }
+
+  .action-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+  .count-hint { font-size: 0.78rem; color: #64748b; }
+  .count-hint b { color: #6366f1; }
+
+  .spinner {
+    display: inline-block; width: 14px; height: 14px; border: 2px solid #ffffff44;
+    border-top-color: #fff; border-radius: 50%; animation: spin .6s linear infinite;
+    margin-right: 6px; vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* results */
+  .status-ok    { color: #22c55e; font-weight: 700; }
+  .status-redir { color: #f59e0b; font-weight: 700; }
+  .status-err   { color: #ef4444; font-weight: 700; }
+  .url-cell {
+    font-family: 'SF Mono', monospace; font-size: 0.72rem; color: #a5b4fc;
+    max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .preview-cell {
+    font-family: 'SF Mono', monospace; font-size: 0.72rem; color: #64748b;
+    max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .extracted-cell {
+    font-family: 'SF Mono', monospace; font-size: 0.78rem; color: #34d399;
+    max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .extracted-null { color: #334155; font-style: italic; }
+
+  /* ── EXTRACTOR PANEL ── */
+  #extract-panel {
+    display: none;
+    background: #071525;
+    border: 2px solid #0891b2;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 18px;
+  }
+  #extract-panel.visible { display: block; }
+
+  .extract-header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .extract-icon {
+    width: 34px; height: 34px; border-radius: 8px; background: #0e4f6a;
+    display: flex; align-items: center; justify-content: center; font-size: 1.1rem; flex-shrink: 0;
+  }
+  .extract-header h3 { font-size: 0.95rem; font-weight: 700; color: #67e8f9; }
+  .extract-header p  { font-size: 0.73rem; color: #475569; margin-top: 2px; }
+
+  .extract-input-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .extract-input-row input {
+    flex: 1; background: #071a2a; border-color: #0891b2; font-size: 0.85rem; padding: 11px 14px;
+  }
+  .extract-input-row input:focus { border-color: #67e8f9; }
+  .extract-input-row input::placeholder { color: #1e4a5f; }
+
+  .extract-hint { font-size: 0.72rem; color: #334155; margin-bottom: 14px; }
+  .extract-hint code { color: #67e8f9; background: #0e2a3a; padding: 1px 6px; border-radius: 4px; }
+
+  .extract-result { display: none; }
+  .extract-result.visible { display: block; }
+
+  .csv-block { margin-bottom: 10px; }
+  .csv-block:last-child { margin-bottom: 0; }
+  .csv-block-label { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .csv-key-pill {
+    font-family: 'SF Mono', monospace; font-size: 0.73rem; font-weight: 700;
+    color: #67e8f9; background: #0e3a4d; padding: 3px 10px; border-radius: 20px;
+  }
+  .csv-count { font-size: 0.72rem; color: #475569; }
+
+  .csv-output-row { display: flex; gap: 8px; align-items: flex-start; }
+  .csv-ta {
+    flex: 1; background: #040d1a; border: 1px solid #0891b2; border-radius: 8px;
+    color: #34d399; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.82rem;
+    padding: 10px 12px; resize: none; outline: none; min-height: 44px; line-height: 1.5;
+    cursor: text;
+  }
+  .csv-ta:focus { border-color: #67e8f9; }
+
+  .copy-btn {
+    background: #0e3a4d; border: 1px solid #0891b2; border-radius: 8px;
+    color: #67e8f9; font-size: 0.78rem; font-weight: 700; padding: 10px 16px;
+    cursor: pointer; white-space: nowrap; transition: all .15s; flex-shrink: 0;
+  }
+  .copy-btn:hover  { background: #0891b2; color: #fff; }
+  .copy-btn.copied { background: #166534; border-color: #22c55e; color: #22c55e; }
+
+  .no-data-hint {
+    text-align: center; padding: 16px; color: #1e4a5f; font-size: 0.82rem;
+    border: 1px dashed #0e3a4d; border-radius: 8px;
+  }
+
+  /* raw response viewer */
+  .response-toggle-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 8px; margin-top: 14px;
+  }
+  .response-toggle-label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: #475569; }
+  .toggle-switch {
+    display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;
+  }
+  .toggle-switch input { display: none; }
+  .toggle-track {
+    width: 36px; height: 20px; background: #1e3a4d; border-radius: 10px;
+    position: relative; transition: background .2s; flex-shrink: 0;
+  }
+  .toggle-track::after {
+    content: ''; position: absolute; top: 3px; left: 3px;
+    width: 14px; height: 14px; background: #475569; border-radius: 50%; transition: all .2s;
+  }
+  .toggle-switch input:checked + .toggle-track { background: #0891b2; }
+  .toggle-switch input:checked + .toggle-track::after { left: 19px; background: #fff; }
+  .toggle-label-text { font-size: 0.78rem; color: #64748b; }
+
+  .raw-response-box {
+    display: none; background: #040d1a; border: 1px solid #0e3a4d; border-radius: 8px;
+    padding: 12px; max-height: 320px; overflow-y: auto;
+    font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.75rem;
+    color: #94a3b8; line-height: 1.6; white-space: pre; margin-bottom: 14px;
+  }
+  .raw-response-box.visible { display: block; }
+
+  /* divider */
+  .divider { height: 1px; background: #1e2330; margin: 14px 0; }
+
+  /* result summary bar */
+  .result-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; background: #161b27; border: 1px solid #2d3748;
+    border-radius: 8px 8px 0 0; border-bottom: none;
+    font-size: 0.8rem; color: #94a3b8;
+  }
+</style>
+</head>
+<body>
+
+<!-- ── HEADER ──────────────────────────────────────────────────── -->
+<div class="app-header">
+  <div>
+    <h1>Curl Repeater</h1>
+    <div class="sub">Paste any cURL → auto-fill headers &amp; params → run</div>
+  </div>
+  <div class="mode-toggle">
+    <button class="mode-btn repeater active"   id="btn-repeater"  onclick="setMode('repeater')">⟳ Repeater</button>
+    <button class="mode-btn extractor"         id="btn-extractor" onclick="setMode('extractor')">⇩ Extractor</button>
+  </div>
+</div>
+
+<!-- ── STEP 1: Paste cURL ──────────────────────────────────────── -->
+<section>
+  <label>Paste cURL Command</label>
+  <div class="row">
+    <textarea id="curl-input"
+      placeholder="curl 'https://...' \&#10;  -H 'accept: application/json' \&#10;  -b 'session=abc...'"></textarea>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <button class="btn-indigo" onclick="parseCurl()">&#x25B6; Parse</button>
+      <button class="btn-ghost"  onclick="clearAll()">Clear</button>
+    </div>
+  </div>
+</section>
+
+<!-- ── STEP 2: Configure ──────────────────────────────────────── -->
+<div id="configure-section" style="display:none">
+  <section>
+    <label>Base URL</label>
+    <div class="url-bar">
+      <div class="method-badge" id="method-badge">GET</div>
+      <input type="text" id="base-url" placeholder="https://example.com/api/endpoint" />
+    </div>
+  </section>
+
+  <div class="tab-bar">
+    <div class="tab active" id="tab-headers" onclick="switchTab('headers')">
+      Headers <span class="badge" id="hdr-count">0</span>
+    </div>
+    <div class="tab" id="tab-params" onclick="switchTab('params')">
+      Query Params <span class="badge" id="prm-count">0</span>
+    </div>
+  </div>
+
+  <!-- headers pane -->
+  <section id="pane-headers">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th style="width:36px">On</th><th style="width:220px">Name</th><th>Value</th></tr></thead>
+        <tbody id="headers-body"><tr><td colspan="3" class="empty-state">No headers.</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- params pane -->
+  <section id="pane-params" style="display:none">
+    <div class="section-header">
+      <label style="margin:0">Query Parameters</label>
+      <button class="btn-ghost" style="font-size:.74rem;padding:5px 12px" onclick="addParamRow()">+ Add</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:36px">On</th>
+            <th style="width:190px">Key</th>
+            <!-- dynamic col only in repeater mode -->
+            <th id="th-dynamic" style="width:90px;text-align:center">Dynamic</th>
+            <th>Value(s)</th>
+            <th style="width:36px"></th>
+          </tr>
+        </thead>
+        <tbody id="params-body"><tr><td colspan="5" class="empty-state">No params.</td></tr></tbody>
+      </table>
+    </div>
+    <p id="dynamic-hint" style="font-size:.74rem;color:#475569;margin-top:8px">
+      Check <b style="color:#a5b4fc">Dynamic</b> → comma-separated values → one request per value.
+    </p>
+  </section>
+
+  <!-- Run -->
+  <div class="action-bar" style="margin-bottom:8px">
+    <button id="run-btn" class="btn-green" style="padding:10px 24px;font-size:.9rem" onclick="runRequests()">
+      &#9654; Run Requests
+    </button>
+    <span class="count-hint" id="count-hint"></span>
+  </div>
+</div>
+
+<!-- ── EXTRACTOR PANEL (Extractor mode only) ──────────────────── -->
+<div id="extract-panel">
+  <div class="extract-header">
+    <div class="extract-icon">&#128203;</div>
+    <div>
+      <h3>Extract Key from Response</h3>
+      <p>Enter a key path — values are pulled from all array items automatically</p>
+    </div>
+  </div>
+
+  <div class="extract-input-row">
+    <input type="text" id="extract-key"
+      placeholder="e.g.   mailboxId   or   connectMailboxes.items.mailboxId"
+      oninput="onExtractInput()" />
+    <button class="btn-ghost" onclick="clearExtract()" style="white-space:nowrap">&#10005;</button>
+  </div>
+  <p class="extract-hint">
+    Supports dot-path &nbsp;<code>data.items.id</code>&nbsp; — when the path hits an <b>array</b>,
+    it automatically maps over every element and collects all matching values.
+    Multiple keys comma-separated = multiple rows.
+  </p>
+
+  <!-- raw response viewer toggle -->
+  <div class="response-toggle-bar">
+    <span class="response-toggle-label">Raw Response</span>
+    <label class="toggle-switch">
+      <input type="checkbox" id="response-toggle" onchange="toggleRawResponse(this.checked)" />
+      <div class="toggle-track"></div>
+      <span class="toggle-label-text">View full response</span>
+    </label>
+  </div>
+  <pre class="raw-response-box" id="raw-response-box"></pre>
+
+  <div id="extract-result">
+    <div class="no-data-hint" id="extract-placeholder">
+      Run the request first, then type a key above.
+    </div>
+  </div>
+</div>
+
+<!-- ── RESULTS TABLE ──────────────────────────────────────────── -->
+<section id="results-section" style="display:none">
+  <div class="result-bar">
+    <span id="result-summary"></span>
+    <button class="btn-ghost" style="font-size:.74rem;padding:5px 12px" onclick="clearResults()">Clear</button>
+  </div>
+  <div class="table-wrap" style="border-radius:0 0 8px 8px">
+    <table>
+      <thead id="results-thead">
+        <tr>
+          <th style="width:40px">#</th>
+          <th style="width:90px">Status</th>
+          <th>URL</th>
+          <th style="width:70px">Time</th>
+          <th>Response Preview</th>
+        </tr>
+      </thead>
+      <tbody id="results-body"></tbody>
+    </table>
+  </div>
+</section>
+
+<script>
+// ─── State ────────────────────────────────────────────────────────────────────
+let mode        = 'repeater';   // 'repeater' | 'extractor'
+let headerRows  = [];
+let paramRows   = [];
+let lastResults = [];
+
+// ─── Mode toggle ─────────────────────────────────────────────────────────────
+function setMode(m) {
+  mode = m;
+  document.getElementById('btn-repeater').classList.toggle('active',  m === 'repeater');
+  document.getElementById('btn-extractor').classList.toggle('active', m === 'extractor');
+
+  // run button color + label
+  const runBtn = document.getElementById('run-btn');
+  if (m === 'repeater') {
+    runBtn.className = 'btn-green';
+    runBtn.innerHTML = '&#9654; Run Requests';
+  } else {
+    runBtn.className = 'btn-cyan';
+    runBtn.innerHTML = '&#8681; Fetch &amp; Extract';
+  }
+
+  // count hint
+  document.getElementById('count-hint').style.display = m === 'repeater' ? '' : 'none';
+
+  // dynamic column in params table
+  document.getElementById('th-dynamic').style.display   = m === 'repeater' ? '' : 'none';
+  document.getElementById('dynamic-hint').style.display = m === 'repeater' ? '' : 'none';
+
+  // extractor panel
+  const ep = document.getElementById('extract-panel');
+  ep.classList.toggle('visible', m === 'extractor');
+
+  renderParams(); // re-render to show/hide dynamic col
+  if (lastResults.length && m === 'extractor') renderExtract();
+}
+
+// ─── curl parser ─────────────────────────────────────────────────────────────
+function parseCurl() {
+  const raw = document.getElementById('curl-input').value.trim();
+  if (!raw) return;
+
+  const text = raw.replace(/\\\r?\n\s*/g, ' ').replace(/\s+/g, ' ');
+  const result = { method: 'GET', url: '', headers: [] };
+
+  const urlM = text.match(/curl\s+(?:-[^\s]+\s+)*['"]?([^'">\s]+)['"]?/);
+  if (urlM) result.url = urlM[1].replace(/^['"]|['"]$/g, '');
+
+  const mM = text.match(/-X\s+['"]?(\w+)['"]?/);
+  if (mM) result.method = mM[1].toUpperCase();
+
+  const hRe = /-H\s+['"]([^'"]+)['"]/g;
+  let m;
+  while ((m = hRe.exec(text)) !== null) {
+    const colon = m[1].indexOf(':');
+    if (colon > -1)
+      result.headers.push({ key: m[1].slice(0, colon).trim(), value: m[1].slice(colon + 1).trim() });
+  }
+
+  const bM = text.match(/-b\s+['"]([^'"]+)['"]/);
+  if (bM) {
+    const existing = result.headers.find(h => h.key.toLowerCase() === 'cookie');
+    if (existing) existing.value += '; ' + bM[1];
+    else result.headers.push({ key: 'cookie', value: bM[1] });
+  }
+
+  let baseUrl = result.url;
+  const parsedParams = [];
+  try {
+    const u = new URL(result.url);
+    baseUrl = u.origin + u.pathname;
+    u.searchParams.forEach((v, k) => parsedParams.push({ key: k, value: v }));
+  } catch (_) {}
+
+  headerRows = result.headers.map(h => ({ enabled: true, key: h.key, value: h.value }));
+  paramRows  = parsedParams.map(p => ({ enabled: true, key: p.key, dynamic: false, values: p.value }));
+
+  document.getElementById('method-badge').textContent = result.method;
+  document.getElementById('base-url').value = baseUrl;
+
+  renderHeaders();
+  renderParams();
+  updateCountBadges();
+  updateCountHint();
+  document.getElementById('configure-section').style.display = '';
+}
+
+// ─── Tab switching ────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  document.getElementById('pane-headers').style.display = tab === 'headers' ? '' : 'none';
+  document.getElementById('pane-params').style.display  = tab === 'params'  ? '' : 'none';
+  document.getElementById('tab-headers').classList.toggle('active', tab === 'headers');
+  document.getElementById('tab-params').classList.toggle('active',  tab === 'params');
+}
+
+// ─── Render helpers ───────────────────────────────────────────────────────────
+function renderHeaders() {
+  const tbody = document.getElementById('headers-body');
+  if (!headerRows.length) { tbody.innerHTML = '<tr><td colspan="3" class="empty-state">No headers.</td></tr>'; return; }
+  tbody.innerHTML = headerRows.map((r, i) => `
+    <tr>
+      <td><input type="checkbox" ${r.enabled?'checked':''} onchange="headerRows[${i}].enabled=this.checked;updateCountBadges()"></td>
+      <td><input type="text" value="${esc(r.key)}" oninput="headerRows[${i}].key=this.value"/></td>
+      <td><input type="text" value="${esc(r.value)}" oninput="headerRows[${i}].value=this.value"/></td>
+    </tr>`).join('');
+}
+
+function renderParams() {
+  const tbody = document.getElementById('params-body');
+  const colSpan = mode === 'repeater' ? 5 : 4;
+  if (!paramRows.length) {
+    tbody.innerHTML = `<tr><td colspan="${colSpan}" class="empty-state">No params. Add one or parse a URL that has them.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = paramRows.map((r, i) => {
+    const dynamicCol = mode === 'repeater'
+      ? `<td style="text-align:center"><input type="checkbox" ${r.dynamic?'checked':''} onchange="toggleDynamic(${i},this.checked)"></td>`
+      : '';
+    const valCell = (mode === 'repeater' && r.dynamic)
+      ? `<input class="values-input" type="text" value="${esc(r.values)}" placeholder="val1, val2, val3" oninput="paramRows[${i}].values=this.value;updateCountHint()">`
+      : `<input type="text" value="${esc(r.values)}" oninput="paramRows[${i}].values=this.value"/>`;
+    return `<tr>
+      <td><input type="checkbox" ${r.enabled?'checked':''} onchange="paramRows[${i}].enabled=this.checked;updateCountHint()"></td>
+      <td><input type="text" value="${esc(r.key)}" oninput="paramRows[${i}].key=this.value"/></td>
+      ${dynamicCol}
+      <td>${valCell}</td>
+      <td><button class="btn-danger" style="padding:4px 8px;font-size:.7rem" onclick="removeParam(${i})">✕</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function toggleDynamic(i, val) { paramRows[i].dynamic = val; renderParams(); updateCountHint(); }
+function removeParam(i)        { paramRows.splice(i, 1); renderParams(); updateCountHint(); }
+function addParamRow()         { paramRows.push({ enabled:true, key:'', dynamic:false, values:'' }); renderParams(); updateCountBadges(); }
+
+function updateCountBadges() {
+  document.getElementById('hdr-count').textContent = headerRows.filter(h => h.enabled).length;
+  document.getElementById('prm-count').textContent = paramRows.filter(p => p.enabled).length;
+}
+function updateCountHint() {
+  updateCountBadges();
+  const dyn = paramRows.filter(p => p.enabled && p.dynamic);
+  const count = dyn.length
+    ? Math.max(...dyn.map(p => p.values.split(',').map(v=>v.trim()).filter(Boolean).length))
+    : 1;
+  document.getElementById('count-hint').innerHTML =
+    count > 1 ? `Will fire <b>${count}</b> requests` : `Will fire <b>1</b> request`;
+}
+
+function esc(s) {
+  return String(s??'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ─── Run ──────────────────────────────────────────────────────────────────────
+async function runRequests() {
+  const baseUrl = document.getElementById('base-url').value.trim();
+  if (!baseUrl) { alert('No URL set.'); return; }
+
+  const headers = {};
+  for (const r of headerRows)
+    if (r.enabled && r.key) headers[r.key] = r.value;
+
+  // In extractor mode, always run once (no dynamic params)
+  const queryParams = paramRows.filter(p => p.enabled && p.key).map(p => ({
+    key: p.key,
+    values: (mode === 'repeater' && p.dynamic)
+      ? p.values.split(',').map(v=>v.trim()).filter(Boolean)
+      : [p.values]
+  }));
+
+  const btn = document.getElementById('run-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Running…';
+
+  try {
+    const res = await fetch('/api/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ baseUrl, headers, queryParams })
+    });
+    lastResults = await res.json();
+    renderResults(lastResults);
+    if (mode === 'extractor') {
+      renderExtract();
+      // refresh raw box if it's already open
+      if (document.getElementById('response-toggle').checked) toggleRawResponse(true);
+    }
+  } catch (e) {
+    alert('Error: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = mode === 'repeater'
+      ? '&#9654; Run Requests'
+      : '&#8681; Fetch &amp; Extract';
+  }
+}
+
+// ─── JSON extraction helpers ─────────────────────────────────────────────────
+
+function getParsed(r) {
+  if ('_parsed' in r) return r._parsed;
+  try { r._parsed = r.body ? JSON.parse(r.body) : null; } catch (_) { r._parsed = null; }
+  return r._parsed;
+}
+
+// Path-based traversal: auto-maps over arrays at any step.
+// "connectMailboxes.items.mailboxId" → collects mailboxId from every item.
+function walkPath(val, parts) {
+  if (parts.length === 0) return val;
+  if (val == null) return undefined;
+  if (Array.isArray(val)) {
+    const results = val.map(item => walkPath(item, parts)).filter(v => v != null);
+    return results.length ? results.flat() : undefined;
+  }
+  if (typeof val !== 'object') return undefined;
+  const [head, ...rest] = parts;
+  return walkPath(val[head], rest);
+}
+
+// Deep recursive search: finds ALL values for a given key anywhere in the tree.
+// Works regardless of nesting depth. Used when user types a simple key (no dots).
+function deepFind(obj, key) {
+  const results = [];
+  function traverse(val) {
+    if (val === null || val === undefined) return;
+    if (Array.isArray(val))        { val.forEach(traverse); return; }
+    if (typeof val !== 'object')   return;
+    for (const [k, v] of Object.entries(val)) {
+      if (k === key) results.push(v);
+      traverse(v);
+    }
+  }
+  traverse(obj);
+  return results;
+}
+
+function extractValues(obj, keyExpr) {
+  const trimmed = keyExpr.trim();
+  const toStr   = v => typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v);
+
+  if (trimmed.includes('.')) {
+    // Explicit dot-path — traverse exactly
+    const parts  = trimmed.replace(/\[(\d+)\]/g, '.$1').split('.').filter(Boolean);
+    const result = walkPath(obj, parts);
+    if (result == null) return [];
+    return (Array.isArray(result) ? result : [result]).map(toStr);
+  }
+
+  // Simple key — deep-search the entire response tree
+  const found = deepFind(obj, trimmed);
+  // Flatten one level: if a found value is itself an array, spread it
+  const flat  = found.flatMap(v => Array.isArray(v) ? v : [v]);
+  return flat.map(toStr);
+}
+
+// ─── Raw response viewer ──────────────────────────────────────────────────────
+function toggleRawResponse(show) {
+  const box = document.getElementById('raw-response-box');
+  box.classList.toggle('visible', show);
+  if (show && lastResults.length) {
+    const parsed = getParsed(lastResults[0]);
+    box.textContent = parsed ? JSON.stringify(parsed, null, 2) : (lastResults[0].body || '');
+  }
+}
+
+// ─── Extractor panel ──────────────────────────────────────────────────────────
+function onExtractInput() { renderExtract(); }
+function clearExtract()   { document.getElementById('extract-key').value = ''; renderExtract(); }
+
+function renderExtract() {
+  const resultEl = document.getElementById('extract-result');
+  const rawKeys  = document.getElementById('extract-key').value;
+  const keys     = rawKeys.split(',').map(k => k.trim()).filter(Boolean);
+
+  if (!lastResults.length) {
+    resultEl.innerHTML = `<div class="no-data-hint" id="extract-placeholder">Run the request first, then type a key above.</div>`;
+    return;
+  }
+  if (!keys.length) {
+    resultEl.innerHTML = `<div class="no-data-hint">Type a key path above — e.g. <b style="color:#67e8f9">mailboxId</b> or <b style="color:#67e8f9">connectMailboxes.items.mailboxId</b></div>`;
+    return;
+  }
+
+  // For extractor mode we only have 1 result normally, but handle N results too
+  // Collect all values across all responses
+  resultEl.innerHTML = keys.map((key, ki) => {
+    const allValues = [];
+    for (const r of lastResults) {
+      const parsed = getParsed(r);
+      if (parsed == null) continue;
+      allValues.push(...extractValues(parsed, key));
+    }
+
+    const csv  = allValues.join(', ');
+    const tid  = `csv-ta-${ki}`;
+    const bid  = `csv-btn-${ki}`;
+    return `
+      <div class="csv-block">
+        <div class="csv-block-label">
+          <span class="csv-key-pill">${esc(key)}</span>
+          <span class="csv-count">${allValues.length} value${allValues.length !== 1 ? 's' : ''} found</span>
+        </div>
+        <div class="csv-output-row">
+          <textarea id="${tid}" class="csv-ta" rows="2" readonly onclick="this.select()">${esc(csv)}</textarea>
+          <button id="${bid}" class="copy-btn" onclick="copyCSV('${tid}','${bid}')">&#128203; Copy</button>
+        </div>
+      </div>`;
+  }).join('');
+
+  // auto-resize textareas
+  document.querySelectorAll('.csv-ta').forEach(el => {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 150) + 'px';
+  });
+}
+
+function copyCSV(taId, btnId) {
+  const val = document.getElementById(taId).value;
+  navigator.clipboard.writeText(val).then(() => {
+    const btn = document.getElementById(btnId);
+    btn.innerHTML = '&#10003; Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.innerHTML = '&#128203; Copy'; btn.classList.remove('copied'); }, 2000);
+  });
+}
+
+// ─── Results table ────────────────────────────────────────────────────────────
+function renderResults(results) {
+  const section = document.getElementById('results-section');
+  const tbody   = document.getElementById('results-body');
+  const thead   = document.getElementById('results-thead');
+  const summary = document.getElementById('result-summary');
+
+  const ok = results.filter(r => r.status >= 200 && r.status < 400).length;
+  summary.innerHTML = `<b>${results.length}</b> requests &nbsp;·&nbsp; <span style="color:#22c55e">${ok} ok</span> &nbsp;·&nbsp; <span style="color:#ef4444">${results.length - ok} failed</span>`;
+
+  thead.innerHTML = `<tr>
+    <th style="width:40px">#</th>
+    <th style="width:90px">Status</th>
+    <th>URL</th>
+    <th style="width:70px">Time</th>
+    <th>Response Preview</th>
+  </tr>`;
+
+  tbody.innerHTML = results.map((r, i) => {
+    const cls = r.status === 0 ? 'status-err' : r.status < 300 ? 'status-ok' : r.status < 400 ? 'status-redir' : 'status-err';
+    const lbl = r.status === 0 ? 'ERR' : `${r.status}`;
+    const preview = r.body ? (r.body.length > 120 ? r.body.slice(0,120)+'…' : r.body) : '';
+    return `<tr>
+      <td style="color:#475569">${i+1}</td>
+      <td class="${cls}">${lbl}<br><span style="font-size:.63rem;font-weight:400;color:#64748b">${esc(r.statusText)}</span></td>
+      <td class="url-cell" title="${esc(r.url)}">${esc(r.url)}</td>
+      <td style="color:#94a3b8;font-size:.76rem">${r.ms}ms</td>
+      <td class="preview-cell" title="${esc(r.body??'')}">${esc(preview)}</td>
+    </tr>`;
+  }).join('');
+
+  section.style.display = '';
+}
+
+function clearResults() {
+  lastResults = [];
+  document.getElementById('results-section').style.display = 'none';
+  document.getElementById('results-body').innerHTML = '';
+  renderExtract();
+}
+
+function clearAll() {
+  document.getElementById('curl-input').value = '';
+  document.getElementById('configure-section').style.display = 'none';
+  headerRows = []; paramRows = [];
+  clearResults();
+}
+
+// init
+setMode('repeater');
+updateCountHint();
+</script>
+</body>
+</html>

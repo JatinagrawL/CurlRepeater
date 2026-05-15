@@ -1,0 +1,25 @@
+{
+  "Files": [
+    {
+      "Id": "/Users/jatinagrawal/Desktop/OUTPLAY/TEST/CurlRepeater/wwwroot/index.html",
+      "PackagePath": "staticwebassets/index.html"
+    },
+    {
+      "Id": "obj/Debug/net8.0/staticwebassets/msbuild.CurlRepeater.Microsoft.AspNetCore.StaticWebAssets.props",
+      "PackagePath": "build\\Microsoft.AspNetCore.StaticWebAssets.props"
+    },
+    {
+      "Id": "obj/Debug/net8.0/staticwebassets/msbuild.build.CurlRepeater.props",
+      "PackagePath": "build\\CurlRepeater.props"
+    },
+    {
+      "Id": "obj/Debug/net8.0/staticwebassets/msbuild.buildMultiTargeting.CurlRepeater.props",
+      "PackagePath": "buildMultiTargeting\\CurlRepeater.props"
+    },
+    {
+      "Id": "obj/Debug/net8.0/staticwebassets/msbuild.buildTransitive.CurlRepeater.props",
+      "PackagePath": "buildTransitive\\CurlRepeater.props"
+    }
+  ],
+  "ElementsToRemove": []
+}

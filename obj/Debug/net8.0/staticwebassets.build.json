@@ -1,0 +1,39 @@
+{
+  "Version": 1,
+  "Hash": "w6peKFnzW4YIVM+/dX/9nvpc3rjpdceaokHK4diNoZs=",
+  "Source": "CurlRepeater",
+  "BasePath": "_content/CurlRepeater",
+  "Mode": "Default",
+  "ManifestType": "Build",
+  "ReferencedProjectsConfiguration": [],
+  "DiscoveryPatterns": [
+    {
+      "Name": "CurlRepeater/wwwroot",
+      "Source": "CurlRepeater",
+      "ContentRoot": "/Users/jatinagrawal/Desktop/OUTPLAY/TEST/CurlRepeater/wwwroot/",
+      "BasePath": "_content/CurlRepeater",
+      "Pattern": "**"
+    }
+  ],
+  "Assets": [
+    {
+      "Identity": "/Users/jatinagrawal/Desktop/OUTPLAY/TEST/CurlRepeater/wwwroot/index.html",
+      "SourceId": "CurlRepeater",
+      "SourceType": "Discovered",
+      "ContentRoot": "/Users/jatinagrawal/Desktop/OUTPLAY/TEST/CurlRepeater/wwwroot/",
+      "BasePath": "_content/CurlRepeater",
+      "RelativePath": "index.html",
+      "AssetKind": "All",
+      "AssetMode": "All",
+      "AssetRole": "Primary",
+      "AssetMergeBehavior": "PreferTarget",
+      "AssetMergeSource": "",
+      "RelatedAsset": "",
+      "AssetTraitName": "",
+      "AssetTraitValue": "",
+      "CopyToOutputDirectory": "Never",
+      "CopyToPublishDirectory": "PreserveNewest",
+      "OriginalItemSpec": "wwwroot/index.html"
+    }
+  ]
+}
