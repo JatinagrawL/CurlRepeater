@@ -22,7 +22,7 @@ jobs:
         run: |
           dotnet publish CurlRepeater.csproj `
             -c Release `
-            -r win-x64 `
+            -r win-x86 `
             --self-contained true `
             /p:PublishSingleFile=false `
             -o ./publish
