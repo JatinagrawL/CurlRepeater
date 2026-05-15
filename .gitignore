@@ -5,3 +5,6 @@ publish/
 *.pubxml.user
 *.suo
 .vs/
+*.lscache
+*.publishSettings
+publish-test/
