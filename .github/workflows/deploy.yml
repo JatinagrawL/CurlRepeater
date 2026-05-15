@@ -29,14 +29,20 @@ jobs:
       - name: Deploy via WebDeploy (MSDeploy)
         run: |
           $msdeploy = "C:\Program Files\IIS\Microsoft Web Deploy V3\msdeploy.exe"
+          $publishPath = (Resolve-Path ./publish).Path
+
+          # Build dest as a single string — msdeploy requires all provider settings
+          # to be one unbroken comma-separated argument after "-dest:"
+          $dest = "contentPath=site69136," +
+                  "computerName=https://site69136.siteasp.net:8172/msdeploy.axd?site=site69136," +
+                  "userName=${{ secrets.MSDEPLOY_USER }}," +
+                  "password=${{ secrets.MSDEPLOY_PASSWORD }}," +
+                  "authType=Basic"
+
           & $msdeploy `
             -verb:sync `
-            -source:contentPath="$(Resolve-Path ./publish)" `
-            -dest:contentPath="site69136",`
-                  computerName="https://site69136.siteasp.net:8172/msdeploy.axd?site=site69136",`
-                  userName="${{ secrets.MSDEPLOY_USER }}",`
-                  password="${{ secrets.MSDEPLOY_PASSWORD }}",`
-                  authType="Basic" `
+            "-source:contentPath=$publishPath" `
+            "-dest:$dest" `
             -allowUntrusted `
             -enableRule:AppOffline
         shell: powershell
