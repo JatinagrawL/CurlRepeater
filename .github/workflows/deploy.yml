@@ -18,10 +18,12 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Publish (Release, framework-dependent)
+      - name: Publish (Release, framework-dependent, no EXE)
         run: |
           dotnet publish CurlRepeater.csproj `
             -c Release `
+            -p:SelfContained=false `
+            -p:UseAppHost=false `
             -o ./publish
 
       - name: Deploy via WebDeploy (MSDeploy)
@@ -31,8 +33,8 @@ jobs:
 
           # Build dest as a single string — msdeploy requires all provider settings
           # to be one unbroken comma-separated argument after "-dest:"
-          $dest = "contentPath=site69136," +
-                  "computerName=https://site69136.siteasp.net:8172/msdeploy.axd?site=site69136," +
+          $dest = "contentPath=site69447," +
+                  "computerName=https://site69447.siteasp.net:8172/msdeploy.axd?site=site69447," +
                   "userName=${{ secrets.MSDEPLOY_USER }}," +
                   "password=${{ secrets.MSDEPLOY_PASSWORD }}," +
                   "authType=Basic"
