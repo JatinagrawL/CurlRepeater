@@ -65,16 +65,27 @@
   .btn-ghost:hover:not(:disabled)   { border-color: #6366f1; color: #e2e8f0; }
   .btn-danger  { background: #ef4444; color: #fff; }
   .btn-danger:hover:not(:disabled)  { background: #dc2626; }
+  .btn-amber   { background: #f59e0b; color: #fff; }
+  .btn-amber:hover:not(:disabled)   { background: #d97706; }
 
   .row { display: flex; gap: 10px; align-items: flex-start; }
   .row textarea { flex: 1; }
 
   .url-bar { display: flex; gap: 8px; }
   .url-bar input { flex: 1; }
-  .method-badge {
+
+  /* method select — styled like the old badge but interactive */
+  #method-select {
     background: #1e2330; border: 1px solid #2d3748; border-radius: 8px;
-    color: #6366f1; font-size: 0.78rem; font-weight: 700; padding: 9px 14px; white-space: nowrap;
+    color: #6366f1; font-size: 0.78rem; font-weight: 700; padding: 9px 14px;
+    white-space: nowrap; cursor: pointer; outline: none; font-family: inherit;
+    transition: border-color .15s;
   }
+  #method-select:focus { border-color: #6366f1; }
+  #method-select option { background: #1e2330; color: #e2e8f0; }
+
+  /* body textarea — slightly taller default */
+  #request-body { min-height: 80px; }
 
   /* tabs */
   .tab-bar {
@@ -283,9 +294,21 @@
   <section>
     <label>Base URL</label>
     <div class="url-bar">
-      <div class="method-badge" id="method-badge">GET</div>
+      <select id="method-select" onchange="onMethodChange()">
+        <option>GET</option>
+        <option>POST</option>
+        <option>PUT</option>
+        <option>PATCH</option>
+        <option>DELETE</option>
+      </select>
       <input type="text" id="base-url" placeholder="https://example.com/api/endpoint" />
     </div>
+  </section>
+
+  <!-- Request Body (shown for POST / PUT / PATCH) -->
+  <section id="body-section" style="display:none">
+    <label>Request Body</label>
+    <textarea id="request-body" placeholder='{"key": "value"}'></textarea>
   </section>
 
   <div class="tab-bar">
@@ -333,10 +356,13 @@
     </p>
   </section>
 
-  <!-- Run -->
+  <!-- Run + Stop -->
   <div class="action-bar" style="margin-bottom:8px">
     <button id="run-btn" class="btn-green" style="padding:10px 24px;font-size:.9rem" onclick="runRequests()">
       &#9654; Run Requests
+    </button>
+    <button id="stop-btn" class="btn-amber" style="padding:10px 24px;font-size:.9rem;display:none" onclick="stopRequests()">
+      &#9632; Stop
     </button>
     <span class="count-hint" id="count-hint"></span>
   </div>
@@ -406,10 +432,11 @@
 
 <script>
 // ─── State ────────────────────────────────────────────────────────────────────
-let mode        = 'repeater';   // 'repeater' | 'extractor'
-let headerRows  = [];
-let paramRows   = [];
-let lastResults = [];
+let mode           = 'repeater';   // 'repeater' | 'extractor'
+let headerRows     = [];
+let paramRows      = [];
+let lastResults    = [];
+let abortController = null;
 
 // ─── Mode toggle ─────────────────────────────────────────────────────────────
 function setMode(m) {
@@ -417,7 +444,6 @@ function setMode(m) {
   document.getElementById('btn-repeater').classList.toggle('active',  m === 'repeater');
   document.getElementById('btn-extractor').classList.toggle('active', m === 'extractor');
 
-  // run button color + label
   const runBtn = document.getElementById('run-btn');
   if (m === 'repeater') {
     runBtn.className = 'btn-green';
@@ -427,19 +453,22 @@ function setMode(m) {
     runBtn.innerHTML = '&#8681; Fetch &amp; Extract';
   }
 
-  // count hint
   document.getElementById('count-hint').style.display = m === 'repeater' ? '' : 'none';
-
-  // dynamic column in params table
   document.getElementById('th-dynamic').style.display   = m === 'repeater' ? '' : 'none';
   document.getElementById('dynamic-hint').style.display = m === 'repeater' ? '' : 'none';
 
-  // extractor panel
   const ep = document.getElementById('extract-panel');
   ep.classList.toggle('visible', m === 'extractor');
 
-  renderParams(); // re-render to show/hide dynamic col
+  renderParams();
   if (lastResults.length && m === 'extractor') renderExtract();
+}
+
+// ─── Method change ────────────────────────────────────────────────────────────
+function onMethodChange() {
+  const m = document.getElementById('method-select').value;
+  const showBody = m === 'POST' || m === 'PUT' || m === 'PATCH';
+  document.getElementById('body-section').style.display = showBody ? '' : 'none';
 }
 
 // ─── curl parser ─────────────────────────────────────────────────────────────
@@ -448,13 +477,20 @@ function parseCurl() {
   if (!raw) return;
 
   const text = raw.replace(/\\\r?\n\s*/g, ' ').replace(/\s+/g, ' ');
-  const result = { method: 'GET', url: '', headers: [] };
+  const result = { method: 'GET', url: '', headers: [], body: '' };
 
   const urlM = text.match(/curl\s+(?:-[^\s]+\s+)*['"]?([^'">\s]+)['"]?/);
   if (urlM) result.url = urlM[1].replace(/^['"]|['"]$/g, '');
 
   const mM = text.match(/-X\s+['"]?(\w+)['"]?/);
   if (mM) result.method = mM[1].toUpperCase();
+
+  // auto-detect method from body flags if -X not present
+  const bodyM = text.match(/(?:--data-raw|--data-binary|--data|(?<!\w)-d)\s+['"]([^'"]*)['"]/);
+  if (bodyM) {
+    result.body = bodyM[1];
+    if (!mM) result.method = 'POST';
+  }
 
   const hRe = /-H\s+['"]([^'"]+)['"]/g;
   let m;
@@ -482,8 +518,10 @@ function parseCurl() {
   headerRows = result.headers.map(h => ({ enabled: true, key: h.key, value: h.value }));
   paramRows  = parsedParams.map(p => ({ enabled: true, key: p.key, dynamic: false, values: p.value }));
 
-  document.getElementById('method-badge').textContent = result.method;
+  document.getElementById('method-select').value = result.method;
   document.getElementById('base-url').value = baseUrl;
+  document.getElementById('request-body').value = result.body;
+  onMethodChange();
 
   renderHeaders();
   renderParams();
@@ -567,7 +605,6 @@ async function runRequests() {
   for (const r of headerRows)
     if (r.enabled && r.key) headers[r.key] = r.value;
 
-  // In extractor mode, always run once (no dynamic params)
   const queryParams = paramRows.filter(p => p.enabled && p.key).map(p => ({
     key: p.key,
     values: (mode === 'repeater' && p.dynamic)
@@ -575,43 +612,58 @@ async function runRequests() {
       : [p.values]
   }));
 
-  const btn = document.getElementById('run-btn');
-  btn.disabled = true;
+  const method = document.getElementById('method-select').value;
+  const body   = document.getElementById('request-body').value;
+
+  const btn     = document.getElementById('run-btn');
+  const stopBtn = document.getElementById('stop-btn');
+  btn.disabled  = true;
   btn.innerHTML = '<span class="spinner"></span>Running…';
+  stopBtn.style.display = '';
+
+  abortController = new AbortController();
 
   try {
     const res = await fetch('/api/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ baseUrl, headers, queryParams })
+      signal: abortController.signal,
+      body: JSON.stringify({ baseUrl, headers, queryParams, method, body })
     });
     lastResults = await res.json();
     renderResults(lastResults);
     if (mode === 'extractor') {
       renderExtract();
-      // refresh raw box if it's already open
       if (document.getElementById('response-toggle').checked) toggleRawResponse(true);
     }
   } catch (e) {
-    alert('Error: ' + e.message);
+    if (e.name === 'AbortError') {
+      document.getElementById('result-summary').innerHTML =
+        '<span style="color:#f59e0b">&#9632; Stopped by user</span>';
+      document.getElementById('results-section').style.display = '';
+    } else {
+      alert('Error: ' + e.message);
+    }
   } finally {
+    abortController = null;
     btn.disabled = false;
-    btn.innerHTML = mode === 'repeater'
-      ? '&#9654; Run Requests'
-      : '&#8681; Fetch &amp; Extract';
+    btn.innerHTML = mode === 'repeater' ? '&#9654; Run Requests' : '&#8681; Fetch &amp; Extract';
+    stopBtn.style.display = 'none';
   }
 }
 
-// ─── JSON extraction helpers ─────────────────────────────────────────────────
+// ─── Stop ─────────────────────────────────────────────────────────────────────
+function stopRequests() {
+  if (abortController) abortController.abort();
+}
 
+// ─── JSON extraction helpers ─────────────────────────────────────────────────
 function getParsed(r) {
   if ('_parsed' in r) return r._parsed;
   try { r._parsed = r.body ? JSON.parse(r.body) : null; } catch (_) { r._parsed = null; }
   return r._parsed;
 }
 
-// Path-based traversal: auto-maps over arrays at any step.
-// "connectMailboxes.items.mailboxId" → collects mailboxId from every item.
 function walkPath(val, parts) {
   if (parts.length === 0) return val;
   if (val == null) return undefined;
@@ -624,8 +676,6 @@ function walkPath(val, parts) {
   return walkPath(val[head], rest);
 }
 
-// Deep recursive search: finds ALL values for a given key anywhere in the tree.
-// Works regardless of nesting depth. Used when user types a simple key (no dots).
 function deepFind(obj, key) {
   const results = [];
   function traverse(val) {
@@ -646,16 +696,13 @@ function extractValues(obj, keyExpr) {
   const toStr   = v => typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v);
 
   if (trimmed.includes('.')) {
-    // Explicit dot-path — traverse exactly
     const parts  = trimmed.replace(/\[(\d+)\]/g, '.$1').split('.').filter(Boolean);
     const result = walkPath(obj, parts);
     if (result == null) return [];
     return (Array.isArray(result) ? result : [result]).map(toStr);
   }
 
-  // Simple key — deep-search the entire response tree
   const found = deepFind(obj, trimmed);
-  // Flatten one level: if a found value is itself an array, spread it
   const flat  = found.flatMap(v => Array.isArray(v) ? v : [v]);
   return flat.map(toStr);
 }
@@ -688,8 +735,6 @@ function renderExtract() {
     return;
   }
 
-  // For extractor mode we only have 1 result normally, but handle N results too
-  // Collect all values across all responses
   resultEl.innerHTML = keys.map((key, ki) => {
     const allValues = [];
     for (const r of lastResults) {
@@ -714,7 +759,6 @@ function renderExtract() {
       </div>`;
   }).join('');
 
-  // auto-resize textareas
   document.querySelectorAll('.csv-ta').forEach(el => {
     el.style.height = 'auto';
     el.style.height = Math.min(el.scrollHeight, 150) + 'px';
@@ -779,7 +823,7 @@ function clearAll() {
   clearResults();
 }
 
-// init
+// ─── Init ─────────────────────────────────────────────────────────────────────
 setMode('repeater');
 updateCountHint();
 </script>

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
@@ -12,6 +13,8 @@ app.MapPost("/api/run", async (RunRequest req) =>
 
     var dynamicParams = req.QueryParams.Where(p => p.Values.Length > 1).ToList();
     int rowCount = dynamicParams.Count > 0 ? dynamicParams.Max(p => p.Values.Length) : 1;
+
+    var method = string.IsNullOrWhiteSpace(req.Method) ? "GET" : req.Method.ToUpperInvariant();
 
     for (int i = 0; i < rowCount; i++)
     {
@@ -30,10 +33,23 @@ app.MapPost("/api/run", async (RunRequest req) =>
             using var handler = new HttpClientHandler { AllowAutoRedirect = true, UseCookies = false };
             using var client = new HttpClient(handler);
 
-            foreach (var (key, value) in req.Headers)
-                client.DefaultRequestHeaders.TryAddWithoutValidation(key, value);
+            var request = new HttpRequestMessage(new HttpMethod(method), url);
 
-            var response = await client.GetAsync(url);
+            foreach (var (key, value) in req.Headers)
+            {
+                if (key.Equals("content-type", StringComparison.OrdinalIgnoreCase)) continue;
+                request.Headers.TryAddWithoutValidation(key, value);
+            }
+
+            if (method is "POST" or "PUT" or "PATCH")
+            {
+                var contentType = req.Headers
+                    .FirstOrDefault(kv => kv.Key.Equals("content-type", StringComparison.OrdinalIgnoreCase)).Value
+                    ?? "application/json";
+                request.Content = new StringContent(req.Body ?? "", Encoding.UTF8, contentType);
+            }
+
+            var response = await client.SendAsync(request);
             sw.Stop();
 
             var body = await response.Content.ReadAsStringAsync();
@@ -58,5 +74,5 @@ app.MapPost("/api/run", async (RunRequest req) =>
 app.Run();
 
 record QueryParam(string Key, string[] Values);
-record RunRequest(string BaseUrl, Dictionary<string, string> Headers, QueryParam[] QueryParams);
+record RunRequest(string BaseUrl, Dictionary<string, string> Headers, QueryParam[] QueryParams, string Method = "GET", string? Body = null);
 record RequestResult(string Url, int Status, string StatusText, long Ms, string Body);
