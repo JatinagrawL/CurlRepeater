@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -7,7 +8,7 @@ var app = builder.Build();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
-app.MapPost("/api/run", async (RunRequest req) =>
+app.MapPost("/api/run", async (RunRequest req, CancellationToken ct) =>
 {
     var results = new List<RequestResult>();
 
@@ -16,8 +17,26 @@ app.MapPost("/api/run", async (RunRequest req) =>
 
     var method = string.IsNullOrWhiteSpace(req.Method) ? "GET" : req.Method.ToUpperInvariant();
 
+    // One handler/client for the whole batch — creating one per request exhausts sockets.
+    using var handler = new HttpClientHandler
+    {
+        AllowAutoRedirect = true,
+        UseCookies = false,
+        AutomaticDecompression = DecompressionMethods.All
+    };
+    using var client = new HttpClient(handler);
+
+    // Headers that are auto-managed by HttpClient / the content, or that would
+    // break the request if copied verbatim from the pasted curl.
+    var skipHeaders = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "content-type", "content-length", "accept-encoding", "host", "connection"
+    };
+
     for (int i = 0; i < rowCount; i++)
     {
+        if (ct.IsCancellationRequested) break;   // user hit Stop → abandon remaining requests
+
         var queryParts = new List<string>();
         foreach (var p in req.QueryParams)
         {
@@ -30,29 +49,32 @@ app.MapPost("/api/run", async (RunRequest req) =>
 
         try
         {
-            using var handler = new HttpClientHandler { AllowAutoRedirect = true, UseCookies = false };
-            using var client = new HttpClient(handler);
-
             var request = new HttpRequestMessage(new HttpMethod(method), url);
 
             foreach (var (key, value) in req.Headers)
             {
-                if (key.Equals("content-type", StringComparison.OrdinalIgnoreCase)) continue;
+                if (skipHeaders.Contains(key)) continue;
                 request.Headers.TryAddWithoutValidation(key, value);
             }
 
-            if (method is "POST" or "PUT" or "PATCH")
+            if (!string.IsNullOrEmpty(req.Body) && method is "POST" or "PUT" or "PATCH" or "DELETE")
             {
                 var contentType = req.Headers
-                    .FirstOrDefault(kv => kv.Key.Equals("content-type", StringComparison.OrdinalIgnoreCase)).Value
-                    ?? "application/json";
-                request.Content = new StringContent(req.Body ?? "", Encoding.UTF8, contentType);
+                    .FirstOrDefault(kv => kv.Key.Equals("content-type", StringComparison.OrdinalIgnoreCase)).Value;
+                if (string.IsNullOrWhiteSpace(contentType)) contentType = "application/json";
+
+                var content = new StringContent(req.Body, Encoding.UTF8);
+                // Set the content-type as a raw string so parameters (e.g. "; charset=utf-8")
+                // don't throw the way the StringContent(…, mediaType) overload does.
+                content.Headers.Remove("Content-Type");
+                content.Headers.TryAddWithoutValidation("Content-Type", contentType);
+                request.Content = content;
             }
 
-            var response = await client.SendAsync(request);
+            var response = await client.SendAsync(request, ct);
             sw.Stop();
 
-            var body = await response.Content.ReadAsStringAsync();
+            var body = await response.Content.ReadAsStringAsync(ct);
             results.Add(new RequestResult(
                 url,
                 (int)response.StatusCode,
@@ -60,6 +82,11 @@ app.MapPost("/api/run", async (RunRequest req) =>
                 sw.ElapsedMilliseconds,
                 body
             ));
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            sw.Stop();
+            break;   // client disconnected / Stop pressed — no point continuing
         }
         catch (Exception ex)
         {

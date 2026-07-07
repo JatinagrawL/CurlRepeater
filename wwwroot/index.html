@@ -300,6 +300,8 @@
         <option>PUT</option>
         <option>PATCH</option>
         <option>DELETE</option>
+        <option>HEAD</option>
+        <option>OPTIONS</option>
       </select>
       <input type="text" id="base-url" placeholder="https://example.com/api/endpoint" />
     </div>
@@ -472,40 +474,130 @@ function onMethodChange() {
 }
 
 // ─── curl parser ─────────────────────────────────────────────────────────────
+// A minimal shell-aware tokenizer. Splits on unquoted whitespace while keeping
+// single-quoted, double-quoted and backslash-escaped segments intact — so values
+// that contain the *other* quote character (e.g. JSON bodies, sec-ch-ua headers,
+// cookies with embedded {"...":"..."} ) are preserved instead of being truncated.
+function tokenizeShell(input) {
+  const tokens = [];
+  let cur = '', hasToken = false, i = 0;
+  const n = input.length;
+  while (i < n) {
+    const c = input[i];
+    if (c === '\\') {
+      const next = input[i + 1];
+      if (next === '\n') { i += 2; continue; }                 // line continuation
+      if (next === '\r' && input[i + 2] === '\n') { i += 3; continue; }
+      if (next === undefined) { i++; continue; }
+      cur += next; hasToken = true; i += 2; continue;          // escaped char
+    }
+    if (c === '$' && input[i + 1] === "'") {                    // ANSI-C quoting $'...' (Chrome bash export)
+      i += 2;
+      while (i < n && input[i] !== "'") {
+        if (input[i] !== '\\') { cur += input[i]; i++; continue; }
+        const e = input[i + 1];
+        const simple = { n:'\n', t:'\t', r:'\r', b:'\b', f:'\f', v:'\v', a:'\x07', e:'\x1b', '\\':'\\', "'":"'", '"':'"', '?':'?' };
+        if (e in simple) { cur += simple[e]; i += 2; }
+        else if (e === 'x') {
+          const h = (input.slice(i + 2, i + 4).match(/^[0-9a-fA-F]{1,2}/) || [''])[0];
+          if (h) { cur += String.fromCharCode(parseInt(h, 16)); i += 2 + h.length; } else { cur += 'x'; i += 2; }
+        }
+        else if (e === 'u' || e === 'U') {
+          const len = e === 'u' ? 4 : 8;
+          const h = (input.slice(i + 2, i + 2 + len).match(new RegExp('^[0-9a-fA-F]{1,' + len + '}')) || [''])[0];
+          if (h) { cur += String.fromCodePoint(parseInt(h, 16)); i += 2 + h.length; } else { cur += e; i += 2; }
+        }
+        else if (e >= '0' && e <= '7') {
+          const o = (input.slice(i + 1, i + 4).match(/^[0-7]{1,3}/) || [''])[0];
+          cur += String.fromCharCode(parseInt(o, 8)); i += 1 + o.length;
+        }
+        else if (e === undefined) { i += 1; }
+        else { cur += e; i += 2; }                              // unknown escape → literal
+      }
+      i++; hasToken = true; continue;                           // skip closing '
+    }
+    if (c === "'") {                                            // single-quoted: literal
+      i++;
+      while (i < n && input[i] !== "'") { cur += input[i]; i++; }
+      i++; hasToken = true; continue;
+    }
+    if (c === '"') {                                            // double-quoted: honour \" \\ \$ \`
+      i++;
+      while (i < n && input[i] !== '"') {
+        if (input[i] === '\\' && '"\\$`'.includes(input[i + 1])) { cur += input[i + 1]; i += 2; }
+        else { cur += input[i]; i++; }
+      }
+      i++; hasToken = true; continue;
+    }
+    if (c === ' ' || c === '\t' || c === '\n' || c === '\r') {
+      if (hasToken) { tokens.push(cur); cur = ''; hasToken = false; }
+      i++; continue;
+    }
+    cur += c; hasToken = true; i++;
+  }
+  if (hasToken) tokens.push(cur);
+  return tokens;
+}
+
+function addHeader(result, raw) {
+  const colon = raw.indexOf(':');
+  if (colon < 0) return;
+  const key = raw.slice(0, colon).trim();
+  const value = raw.slice(colon + 1).trim();
+  if (key) result.headers.push({ key, value });
+}
+
 function parseCurl() {
   const raw = document.getElementById('curl-input').value.trim();
   if (!raw) return;
 
-  const text = raw.replace(/\\\r?\n\s*/g, ' ').replace(/\s+/g, ' ');
-  const result = { method: 'GET', url: '', headers: [], body: '' };
+  const tokens = tokenizeShell(raw);
+  const result = { method: '', url: '', headers: [], body: '', cookie: '' };
 
-  const urlM = text.match(/curl\s+(?:-[^\s]+\s+)*['"]?([^'">\s]+)['"]?/);
-  if (urlM) result.url = urlM[1].replace(/^['"]|['"]$/g, '');
+  const dataFlags   = new Set(['--data', '--data-raw', '--data-binary', '--data-ascii', '--data-urlencode', '-d']);
+  const attachData  = ['--data-raw', '--data-binary', '--data-ascii', '--data-urlencode', '--data'];
+  // flags that consume the following token as an argument we don't need — skip both
+  const takesArg    = new Set(['-A', '--user-agent', '-e', '--referer', '-u', '--user', '--connect-timeout',
+                               '--max-time', '-m', '--retry', '-o', '--output', '-w', '--write-out',
+                               '-T', '--upload-file', '-x', '--proxy', '--cacert', '--cert', '--key']);
 
-  const mM = text.match(/-X\s+['"]?(\w+)['"]?/);
-  if (mM) result.method = mM[1].toUpperCase();
+  const addBody = v => { result.body = result.body ? result.body + '&' + v : v; if (!result.method) result.method = 'POST'; };
 
-  // auto-detect method from body flags if -X not present
-  const bodyM = text.match(/(?:--data-raw|--data-binary|--data|(?<!\w)-d)\s+['"]([^'"]*)['"]/);
-  if (bodyM) {
-    result.body = bodyM[1];
-    if (!mM) result.method = 'POST';
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (i === 0 && t === 'curl') continue;
+
+    if (t === '-X' || t === '--request') { result.method = (tokens[++i] || '').toUpperCase(); continue; }
+    if (t === '-H' || t === '--header')  { addHeader(result, tokens[++i] || ''); continue; }
+    if (t === '-b' || t === '--cookie')  { const v = tokens[++i] || ''; result.cookie = result.cookie ? result.cookie + '; ' + v : v; continue; }
+    if (t === '--url')                   { result.url = tokens[++i] || ''; continue; }
+    if (dataFlags.has(t))                { addBody(tokens[++i] || ''); continue; }
+    if (t === '--json') {
+      addBody(tokens[++i] || '');
+      if (!result.headers.some(h => h.key.toLowerCase() === 'content-type'))
+        result.headers.push({ key: 'content-type', value: 'application/json' });
+      continue;
+    }
+
+    // attached forms produced by some exporters: -H'name: v', --header=..., --data-raw=...
+    if (t.length > 2 && t.startsWith('-H') && t[2] !== '-') { addHeader(result, t.slice(2)); continue; }
+    if (t.startsWith('--header=')) { addHeader(result, t.slice(9)); continue; }
+    let attached = false;
+    for (const df of attachData) if (t.startsWith(df + '=')) { addBody(t.slice(df.length + 1)); attached = true; break; }
+    if (attached) continue;
+    if (t.length > 2 && t.startsWith('-d')) { addBody(t.slice(2)); continue; }
+
+    if (takesArg.has(t)) { i++; continue; }   // skip flag + its argument
+    if (t.startsWith('-')) continue;          // ignore other no-arg flags (-L, --compressed, -s, …)
+    if (!result.url) result.url = t;          // first bare token is the URL
   }
 
-  const hRe = /-H\s+['"]([^'"]+)['"]/g;
-  let m;
-  while ((m = hRe.exec(text)) !== null) {
-    const colon = m[1].indexOf(':');
-    if (colon > -1)
-      result.headers.push({ key: m[1].slice(0, colon).trim(), value: m[1].slice(colon + 1).trim() });
-  }
-
-  const bM = text.match(/-b\s+['"]([^'"]+)['"]/);
-  if (bM) {
+  if (result.cookie) {
     const existing = result.headers.find(h => h.key.toLowerCase() === 'cookie');
-    if (existing) existing.value += '; ' + bM[1];
-    else result.headers.push({ key: 'cookie', value: bM[1] });
+    if (existing) existing.value += '; ' + result.cookie;
+    else result.headers.push({ key: 'cookie', value: result.cookie });
   }
+  if (!result.method) result.method = 'GET';
 
   let baseUrl = result.url;
   const parsedParams = [];
