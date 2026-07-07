@@ -189,6 +189,14 @@
   .extract-result { display: none; }
   .extract-result.visible { display: block; }
 
+  .extract-total-bar {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    background: #04202e; border: 1px solid #0891b2; border-radius: 8px;
+    padding: 10px 14px; margin-bottom: 12px; font-size: 0.9rem; color: #e2e8f0;
+  }
+  .extract-total-bar b { color: #34d399; font-size: 1.05rem; }
+  .extract-total-bar .et-sub { font-size: 0.74rem; color: #475569; }
+
   .csv-block { margin-bottom: 10px; }
   .csv-block:last-child { margin-bottom: 0; }
   .csv-block-label { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
@@ -313,6 +321,40 @@
     <textarea id="request-body" placeholder='{"key": "value"}'></textarea>
   </section>
 
+  <!-- Pagination (iterate a numeric field in the JSON body, e.g. page 1→N) -->
+  <section id="pagination-section" style="display:none">
+    <div class="section-header">
+      <label style="margin:0">Pagination</label>
+      <label class="toggle-switch" style="margin:0">
+        <input type="checkbox" id="paginate-toggle" onchange="onPaginateToggle()" />
+        <div class="toggle-track"></div>
+        <span class="toggle-label-text">Page through a body field</span>
+      </label>
+    </div>
+    <div id="pagination-controls" style="display:none">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <div style="flex:1;min-width:150px">
+          <label>Page field (dot-path)</label>
+          <input type="text" id="page-field" value="page" placeholder="page" oninput="updatePageHint()" />
+        </div>
+        <div style="width:90px">
+          <label>From</label>
+          <input type="text" id="page-from" value="1" oninput="updatePageHint()" />
+        </div>
+        <div style="width:90px">
+          <label>To</label>
+          <input type="text" id="page-to" value="5" oninput="updatePageHint()" />
+        </div>
+      </div>
+      <label class="toggle-switch" style="margin-top:10px">
+        <input type="checkbox" id="page-autostop" checked onchange="updatePageHint()" />
+        <div class="toggle-track"></div>
+        <span class="toggle-label-text">Stop early when a page returns no items</span>
+      </label>
+      <p id="page-hint" style="font-size:.74rem;color:#475569;margin-top:8px"></p>
+    </div>
+  </section>
+
   <div class="tab-bar">
     <div class="tab active" id="tab-headers" onclick="switchTab('headers')">
       Headers <span class="badge" id="hdr-count">0</span>
@@ -391,6 +433,16 @@
     it automatically maps over every element and collects all matching values.
     Multiple keys comma-separated = multiple rows.
   </p>
+
+  <div class="response-toggle-bar" style="margin-top:0">
+    <span class="response-toggle-label">Output</span>
+    <label class="toggle-switch">
+      <input type="checkbox" id="unique-toggle" onchange="renderExtract()" />
+      <div class="toggle-track"></div>
+      <span class="toggle-label-text">Unique values only</span>
+    </label>
+  </div>
+  <div id="extract-total"></div>
 
   <!-- raw response viewer toggle -->
   <div class="response-toggle-bar">
@@ -471,6 +523,47 @@ function onMethodChange() {
   const m = document.getElementById('method-select').value;
   const showBody = m === 'POST' || m === 'PUT' || m === 'PATCH';
   document.getElementById('body-section').style.display = showBody ? '' : 'none';
+  document.getElementById('pagination-section').style.display = showBody ? '' : 'none';
+}
+
+// ─── Pagination controls ────────────────────────────────────────────────────────
+function onPaginateToggle() {
+  const on = document.getElementById('paginate-toggle').checked;
+  document.getElementById('pagination-controls').style.display = on ? '' : 'none';
+  updatePageHint();
+  updateCountHint();
+}
+
+function updatePageHint() {
+  const from = parseInt(document.getElementById('page-from').value, 10);
+  const to   = parseInt(document.getElementById('page-to').value, 10);
+  const field = document.getElementById('page-field').value.trim() || 'page';
+  const el = document.getElementById('page-hint');
+  if (!Number.isFinite(from) || !Number.isFinite(to)) { el.textContent = 'Enter numeric From / To pages.'; return; }
+  const n = Math.abs(to - from) + 1;
+  el.innerHTML = `Will fire up to <b style="color:#a5b4fc">${n}</b> request${n !== 1 ? 's' : ''} — ` +
+    `<code style="color:#67e8f9">${esc(field)}</code> from <b>${from}</b> to <b>${to}</b>` +
+    (document.getElementById('page-autostop').checked ? ', stopping early on an empty page.' : '.');
+  updateCountHint();
+}
+
+// Try to auto-detect a numeric page field in the pasted body and preset the range.
+function detectPagination(bodyText) {
+  let obj;
+  try { obj = JSON.parse(bodyText); } catch { return; }
+  if (!obj || typeof obj !== 'object') return;
+  const cand = ['page', 'pageNo', 'pageNumber', 'pageIndex', 'pageNum', 'p']
+    .find(k => typeof obj[k] === 'number');
+  if (!cand) return;
+  document.getElementById('page-field').value = cand;
+  document.getElementById('page-from').value  = obj[cand];
+  document.getElementById('page-to').value    = obj[cand] + 9;   // default: 10 pages
+  updatePageHint();
+}
+
+function paginationActive() {
+  return document.getElementById('pagination-section').style.display !== 'none'
+      && document.getElementById('paginate-toggle').checked;
 }
 
 // ─── curl parser ─────────────────────────────────────────────────────────────
@@ -614,6 +707,7 @@ function parseCurl() {
   document.getElementById('base-url').value = baseUrl;
   document.getElementById('request-body').value = result.body;
   onMethodChange();
+  detectPagination(result.body);
 
   renderHeaders();
   renderParams();
@@ -676,6 +770,13 @@ function updateCountBadges() {
 }
 function updateCountHint() {
   updateCountBadges();
+  if (paginationActive()) {
+    const from = parseInt(document.getElementById('page-from').value, 10);
+    const to   = parseInt(document.getElementById('page-to').value, 10);
+    const n = (Number.isFinite(from) && Number.isFinite(to)) ? Math.abs(to - from) + 1 : 0;
+    document.getElementById('count-hint').innerHTML = `Will fire up to <b>${n}</b> paged request${n !== 1 ? 's' : ''}`;
+    return;
+  }
   const dyn = paramRows.filter(p => p.enabled && p.dynamic);
   const count = dyn.length
     ? Math.max(...dyn.map(p => p.values.split(',').map(v=>v.trim()).filter(Boolean).length))
@@ -716,17 +817,21 @@ async function runRequests() {
   abortController = new AbortController();
 
   try {
-    const res = await fetch('/api/run', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal: abortController.signal,
-      body: JSON.stringify({ baseUrl, headers, queryParams, method, body })
-    });
-    lastResults = await res.json();
-    renderResults(lastResults);
-    if (mode === 'extractor') {
-      renderExtract();
-      if (document.getElementById('response-toggle').checked) toggleRawResponse(true);
+    if (paginationActive()) {
+      await runPaginated(baseUrl, headers, method, body);
+    } else {
+      const res = await fetch('/api/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: abortController.signal,
+        body: JSON.stringify({ baseUrl, headers, queryParams, method, body })
+      });
+      lastResults = await res.json();
+      renderResults(lastResults);
+      if (mode === 'extractor') {
+        renderExtract();
+        if (document.getElementById('response-toggle').checked) toggleRawResponse(true);
+      }
     }
   } catch (e) {
     if (e.name === 'AbortError') {
@@ -742,6 +847,80 @@ async function runRequests() {
     btn.innerHTML = mode === 'repeater' ? '&#9654; Run Requests' : '&#8681; Fetch &amp; Extract';
     stopBtn.style.display = 'none';
   }
+}
+
+// ─── Paginated run ─────────────────────────────────────────────────────────────
+// Fires one request per page, mutating a numeric field inside the JSON body.
+// Renders progressively so results/IDs accumulate live, and can stop early when a
+// page returns no items.
+async function runPaginated(baseUrl, headers, method, bodyText) {
+  const field    = document.getElementById('page-field').value.trim() || 'page';
+  const from     = parseInt(document.getElementById('page-from').value, 10);
+  const to       = parseInt(document.getElementById('page-to').value, 10);
+  const autostop = document.getElementById('page-autostop').checked;
+
+  if (!Number.isFinite(from) || !Number.isFinite(to)) { alert('Set valid numeric From / To pages.'); return; }
+
+  let bodyObj;
+  try { bodyObj = JSON.parse(bodyText); }
+  catch { alert('The request body must be valid JSON to paginate.'); return; }
+
+  // one fixed value per query param — pagination drives the request count, not the params
+  const queryParams = paramRows.filter(p => p.enabled && p.key).map(p => ({ key: p.key, values: [p.values] }));
+
+  // key used to decide "page has data" when auto-stopping
+  const firstKey = (document.getElementById('extract-key')?.value || '')
+    .split(',').map(s => s.trim()).filter(Boolean)[0];
+
+  lastResults = [];
+  const step = to >= from ? 1 : -1;
+
+  for (let page = from; step > 0 ? page <= to : page >= to; page += step) {
+    if (abortController?.signal.aborted) break;
+
+    setByPath(bodyObj, field, page);
+    const pageBody = JSON.stringify(bodyObj);
+
+    const res = await fetch('/api/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: abortController.signal,
+      body: JSON.stringify({ baseUrl, headers, queryParams, method, body: pageBody })
+    });
+    const rows = await res.json();
+    rows.forEach(r => { r._page = page; });
+    lastResults.push(...rows);
+
+    renderResults(lastResults);
+    if (mode === 'extractor') {
+      renderExtract();
+      if (document.getElementById('response-toggle').checked) toggleRawResponse(true);
+    }
+
+    if (autostop) {
+      const parsed = getParsed(rows[0] || {});
+      const produced = firstKey ? extractValues(parsed, firstKey).length > 0 : hasNonEmptyArray(parsed);
+      if (!produced) break;
+    }
+  }
+}
+
+// Set obj at a dot/bracket path to a value, creating intermediate objects as needed.
+function setByPath(obj, path, value) {
+  const parts = path.replace(/\[(\d+)\]/g, '.$1').split('.').filter(Boolean);
+  let cur = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (cur[parts[i]] == null || typeof cur[parts[i]] !== 'object') cur[parts[i]] = {};
+    cur = cur[parts[i]];
+  }
+  if (parts.length) cur[parts[parts.length - 1]] = value;
+}
+
+// True if the response contains at least one non-empty array anywhere.
+function hasNonEmptyArray(val) {
+  if (Array.isArray(val)) return val.length > 0;
+  if (val && typeof val === 'object') return Object.values(val).some(hasNonEmptyArray);
+  return false;
 }
 
 // ─── Stop ─────────────────────────────────────────────────────────────────────
@@ -815,8 +994,12 @@ function clearExtract()   { document.getElementById('extract-key').value = ''; r
 
 function renderExtract() {
   const resultEl = document.getElementById('extract-result');
+  const totalEl  = document.getElementById('extract-total');
   const rawKeys  = document.getElementById('extract-key').value;
   const keys     = rawKeys.split(',').map(k => k.trim()).filter(Boolean);
+  const uniqueOnly = document.getElementById('unique-toggle').checked;
+
+  if (totalEl) totalEl.innerHTML = '';
 
   if (!lastResults.length) {
     resultEl.innerHTML = `<div class="no-data-hint" id="extract-placeholder">Run the request first, then type a key above.</div>`;
@@ -827,6 +1010,8 @@ function renderExtract() {
     return;
   }
 
+  let grandTotal = 0, grandUnique = 0;
+
   resultEl.innerHTML = keys.map((key, ki) => {
     const allValues = [];
     for (const r of lastResults) {
@@ -835,14 +1020,22 @@ function renderExtract() {
       allValues.push(...extractValues(parsed, key));
     }
 
-    const csv  = allValues.join(', ');
+    const uniqueValues = [...new Set(allValues)];
+    const shown = uniqueOnly ? uniqueValues : allValues;
+    grandTotal  += allValues.length;
+    grandUnique += uniqueValues.length;
+
+    const csv  = shown.join(', ');
     const tid  = `csv-ta-${ki}`;
     const bid  = `csv-btn-${ki}`;
+    const countLabel = uniqueValues.length !== allValues.length
+      ? `${allValues.length} value${allValues.length !== 1 ? 's' : ''} · ${uniqueValues.length} unique`
+      : `${allValues.length} value${allValues.length !== 1 ? 's' : ''} found`;
     return `
       <div class="csv-block">
         <div class="csv-block-label">
           <span class="csv-key-pill">${esc(key)}</span>
-          <span class="csv-count">${allValues.length} value${allValues.length !== 1 ? 's' : ''} found</span>
+          <span class="csv-count">${countLabel}</span>
         </div>
         <div class="csv-output-row">
           <textarea id="${tid}" class="csv-ta" rows="2" readonly onclick="this.select()">${esc(csv)}</textarea>
@@ -850,6 +1043,17 @@ function renderExtract() {
         </div>
       </div>`;
   }).join('');
+
+  if (totalEl) {
+    const pages = lastResults.length;
+    const shownTotal = uniqueOnly ? grandUnique : grandTotal;
+    totalEl.innerHTML =
+      `<div class="extract-total-bar">` +
+        `<span>Total IDs: <b>${shownTotal}</b></span>` +
+        (grandUnique !== grandTotal ? `<span class="et-sub">${grandTotal} raw · ${grandUnique} unique</span>` : '') +
+        `<span class="et-sub">from ${pages} response${pages !== 1 ? 's' : ''}</span>` +
+      `</div>`;
+  }
 
   document.querySelectorAll('.csv-ta').forEach(el => {
     el.style.height = 'auto';
@@ -877,8 +1081,11 @@ function renderResults(results) {
   const ok = results.filter(r => r.status >= 200 && r.status < 400).length;
   summary.innerHTML = `<b>${results.length}</b> requests &nbsp;·&nbsp; <span style="color:#22c55e">${ok} ok</span> &nbsp;·&nbsp; <span style="color:#ef4444">${results.length - ok} failed</span>`;
 
+  const paged = results.some(r => r._page != null);
+
   thead.innerHTML = `<tr>
     <th style="width:40px">#</th>
+    ${paged ? '<th style="width:56px">Page</th>' : ''}
     <th style="width:90px">Status</th>
     <th>URL</th>
     <th style="width:70px">Time</th>
@@ -891,6 +1098,7 @@ function renderResults(results) {
     const preview = r.body ? (r.body.length > 120 ? r.body.slice(0,120)+'…' : r.body) : '';
     return `<tr>
       <td style="color:#475569">${i+1}</td>
+      ${paged ? `<td style="color:#a5b4fc;font-weight:700">${r._page}</td>` : ''}
       <td class="${cls}">${lbl}<br><span style="font-size:.63rem;font-weight:400;color:#64748b">${esc(r.statusText)}</span></td>
       <td class="url-cell" title="${esc(r.url)}">${esc(r.url)}</td>
       <td style="color:#94a3b8;font-size:.76rem">${r.ms}ms</td>
